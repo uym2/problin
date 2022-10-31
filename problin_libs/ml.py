@@ -12,23 +12,44 @@ def prob_same(node_likelihood, char, site, curr_node, use_log):
     tp = math.exp(-get_branchlen(c))
     return tp * node_likelihood[c][site][char]
 
-def prob_change(msa, q_dict, node_likelihood, site, curr_node, use_log):
+def prob_change(msa, q_dict, node_likelihood, site, curr_node, child_states, use_log):
     all_child_prob = 1.0
     for c in curr_node.child_nodes():
-        char = get_char(msa, c, site)
-        if char != 0: 
-            q_ialpha = q_dict[site][char] 
-            tp = q_ialpha * (1 - math.exp(-get_branchlen(c)))
-            all_child_prob *= tp * node_likelihood[c][site][char]
+        # print("[prob_change]: call to get_char()", c)
+        if c.is_leaf():
+            char = get_char(msa, c, site)
+            if char != 0: 
+                # print(q_dict[site], site, char)
+                q_ialpha = q_dict[site][char] 
+                tp = q_ialpha * (1 - math.exp(-get_branchlen(c)))
+                all_child_prob *= tp * node_likelihood[c][site][char]
+            else:
+                q_ialpha = q_dict[site][0]
+                tp = math.exp(-get_branchlen(c))
+                all_child_prob *= tp * node_likelihood[c][site][0]
         else:
-            q_ialpha = q_dict[site][0]
-            tp = math.exp(-get_branchlen(c))
-            all_child_prob *= tp * node_likelihood[c][site][0]
+            for char in node_likelihood[c][site].keys():
+                # print("[prob_change]: internal child char", char)
+                if char != 0: 
+                    # print(q_dict[site], site, char)
+                    q_ialpha = q_dict[site][char] 
+                    if node_likelihood[c][site][char] > 0:
+                        tp = q_ialpha * (1 - math.exp(-get_branchlen(c)))
+                        # print("[prob_change]: tp", tp)
+                        all_child_prob *= tp * node_likelihood[c][site][char]
+                else:
+                    q_ialpha = q_dict[site][0]
+                    if node_likelihood[c][site][0] > 0:
+                        tp = math.exp(-get_branchlen(c))
+                        all_child_prob *= tp * node_likelihood[c][site][0]
+                # print("[prob_change]:", all_child_prob)
+
     return all_child_prob
 
 
 
 def likelihood_under_n(node_likelihood, n, site, msa, q_dict, use_log):
+    # print("[likelihood_under_n]", n, "site", site)
     child_states = set()
     # print(n)
     if n not in node_likelihood:
@@ -44,21 +65,22 @@ def likelihood_under_n(node_likelihood, n, site, msa, q_dict, use_log):
                 state_prob = node_likelihood[child][site][x]
                 if state_prob > 0.0:
                     child_states.append(x)
-                    
+
+    # print("[likelihood_under_n]:", child_states)
     parent_poss_states = dict()
-    if 0 in child_states: # probability 0 -> 0
+    if 0 in set(child_states): # probability 0 -> 0
         if len(set(child_states)) == 1: # both children are state 0 
             parent_poss_states[0] = prob_same(node_likelihood, 0, site, n, use_log) ** 2
         else: 
             for c in child_states: # probability c -> c != 0
                 parent_poss_states[c] = 0.0
             # probability 0 -> c (alpha)
-            parent_poss_states[0] = prob_change(msa, q_dict, node_likelihood, site, n, use_log)  
+            parent_poss_states[0] = prob_change(msa, q_dict, node_likelihood, site, n, child_states, use_log)  
     else:
         if len(set(child_states)) == 1: # both children are same nonzero state
             c = child_states[0]
             parent_poss_states[c] = 1.0 
-            parent_poss_states[0] = prob_change(msa, q_dict, node_likelihood, site, n, use_log)
+            parent_poss_states[0] = prob_change(msa, q_dict, node_likelihood, site, n, child_states, use_log)
         else:
             parent_poss_states[0] = 1.0
 
@@ -82,7 +104,7 @@ def felsenstein(T, Q, msa, root_edge_len=0.2, use_log=False):
     for site in range(numsites):
         alphabet[site] = Q[site].keys()
 
-    print("q_dict", Q)
+    # print("q_dict", Q)
     nwkt = dendropy.Tree.get(data=T, schema="newick")
     print(nwkt)
 
@@ -94,16 +116,17 @@ def felsenstein(T, Q, msa, root_edge_len=0.2, use_log=False):
     ## CALCULATE THE LIKELIHOOD
     for n in nwkt.postorder_node_iter():
         # print("node:", n)
-        if n.taxon is not None: # must be a leaf node, set up 
+        if n.is_leaf(): # n.taxon is not None: # must be a leaf node, set up 
             node_likelihood[n] = dict()
             for site in range(numsites):
                 node_likelihood[n][site] = dict()
                 for char in alphabet[site]:
                     node_likelihood[n][site][char] = 0.0
+                # print("[felsenstein]: in site", site)
                 char_state = get_char(msa, n, site)
                 node_likelihood[n][site][char_state] = 1.0
             
-        elif n.taxon is None: # must be an internal node
+        elif n.is_internal(): # n.taxon is None: # must be an internal node
             for site in range(numsites):
                 if n not in node_likelihood.keys():
                     node_likelihood[n] = dict()
@@ -112,12 +135,15 @@ def felsenstein(T, Q, msa, root_edge_len=0.2, use_log=False):
                     node_likelihood[n][site][char] = 0.0
                 
                 node_likelihood = likelihood_under_n(node_likelihood, n, site, msa, Q, use_log)
-
-    tree_likelihood = 1.0
+            # print(node_likelihood)
+    if use_log:
+        tree_likelihood = 0.0
+    else:
+        tree_likelihood = 1.0
     for site in range(numsites):
         for rootchar in node_likelihood[n][site].keys():
             prob_rootchar = node_likelihood[n][site][rootchar]
-            print(rootchar, prob_rootchar)
+            # print(rootchar, prob_rootchar)
             if prob_rootchar > 0.0: 
                 q_ialpha = Q[site][rootchar]
                 if rootchar == 0:
@@ -214,32 +240,51 @@ def wrapper_felsenstein(T, Q, msa, k, root_edge_len=0.2, use_log=False, initials
             f_star = out.fun
 
     return x_star, f_star
-    
-from problin_libs.sequence_lib import read_sequences
-from treeswift import *
-k=30
-m=10
-Q = []
-for i in range(k):
-    q = {j+1:1/m for j in range(m)}
-    q[0] = 0
-    Q.append(q)
 
-S = read_sequences("../MP_inconsistent/seqs_m10_k" + str(k) + ".txt")
-D = S[1]
-print(D)
+# import sys
+# sys.path.append("/Users/gillianchu/raphael/repos/problin")
+# from problin_libs.sequence_lib import read_sequences
+# from treeswift import *
+# k=30
+# m=10
+# Q = []
+# datadir = "/Users/gillianchu/raphael/repos/problin/MP_inconsistent/"
 
-lb2num = {'a':1,'b':2,'c':3,'d':4}
-tree = read_tree_newick("../MP_inconsistent/m10.tre")
-for node in tree.traverse_leaves():
-    node.label = lb2num[node.label]
-T = tree.newick()
+# for i in range(k):
+#     q = {j+1:1/m for j in range(m)}
+#     q[0] = 0
+#     Q.append(q)
 
-msa = []
-for x in ['a','b','c','d']:
-    seq = [y for y in D[x]]
-    msa.append(seq)
-msa = np.array(msa)
-print(msa)
+# S = read_sequences(datadir + "seqs_m10_k" + str(k) + ".txt")
+# D = S[1]
+# print(D)
 
-print("likelihood",felsenstein(T, Q, msa, root_edge_len=0, use_log=True))
+# lb2num = {'a':1,'b':2,'c':3,'d':4}
+# tree = read_tree_newick(datadir + "m10.tre")
+# for node in tree.traverse_leaves():
+#     node.label = lb2num[node.label]
+# T = tree.newick()
+
+# msa = []
+# for x in ['a','b','c','d']:
+#     seq = [y for y in D[x]]
+#     msa.append(seq)
+# msa = np.array(msa)
+# print(msa)
+
+# T = "((1:0.0360971597765934,2:3.339535381892265)e:0.0360971597765934,(3:0.0360971597765934,4:3.339535381892265)f:0.0360971597765934);"
+# T = "[&R] ((1:0.0360971597765934,2:3.339535381892265):0.0360971597765934,(3:0.0360971597765934,4:3.339535381892265):0.0360971597765934);"
+
+T = '[&R] ((1:0.96,3:0.96):0.14,2:1.10,4:1.10);' # non-star tree
+msa = np.array([[1,0,2], # species 1
+                [1,0,0], # species 2
+                [0,1,2], # species 3
+                [0,1,0]] # species 4
+            )
+
+# prob of transitioning 0 -> 0, 0 -> 1, 0 -> 2
+Q = [{0: 0, 1:0.3, 2:0.5}, # site 1
+        {0: 0, 1:0.3, 2:0.5}, # site 2
+        {0: 0, 1:0.3, 2:0.5}, # site 3
+    ]
+print("likelihood",felsenstein(T, Q, msa, root_edge_len=0, use_log=False))
