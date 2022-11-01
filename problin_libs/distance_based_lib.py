@@ -4,10 +4,27 @@ from sequence_lib import read_sequences
 from scipy import optimize
 from random import random,seed
 from treeswift import *
+import numpy as np
 
 q = 0.1
 
-def ML_pairwise_estimate(a,b,initials=20):
+def ML_pairwise_estimate(a,b,initials=20, use_hess=False):
+
+    def fun_hess(x):
+        a, b, r = x
+        global q
+        m = np.array([[(-((exp(b) - 1)*q*((q-1)*exp(a+b) + exp(a+b+r) - exp(a)*q)))/((q-1)*exp(a+b) - q*exp(a) - q*exp(b) + q)**2 + (-(exp(a)*(len(s_3) + len(s_4)))/(exp(a) - 1)**2) , (q*(exp(r)-1)*exp(a+b))/((q-1)*exp(a+b) + exp(a+b+r) - q*exp(b) - q*exp(b) + q)**2, (-(exp(b) - 1)*exp(a+b+r))/((q-1)*exp(a+b) + exp(a+b+r) - q*exp(a) - q*exp(b) + q)**2],
+                    [(q*(exp(r)-1)*exp(a+b))/((q-1)*exp(a+b) + exp(a+b+r) - q*exp(a) - q*exp(b) + q)**2 , (-(exp(a) - 1) * q * ((q-1)*exp(a+b) + exp(a+b+r) - exp(b) * q)) / ((q-1)*exp(a+b) + exp(a+b+r) - q*exp(a) - q*exp(b) + q)**2 - (exp(b) * (len(s_3) + len(s_5)))/(exp(b) - 1)**2, (-(exp(a) - 1)*q*exp(a+b+r))/((q-1)*exp(a+b) + exp(a+b+r) - q*exp(a) - q*exp(b) + q)**2],
+                    [(-(exp(b) - 1)*exp(a+b+r))/((q-1)*exp(a+b) + exp(a+b+r) - q*exp(a) - q*exp(b) + q)**2 , (-(exp(a) - 1)*q*exp(a+b+r))/((q-1)*exp(a+b) + exp(a+b+r) - q*exp(a) - q*exp(b) + q)**2, -((q-1)*(-exp(a+b)) + exp(a) * q + exp(b) * q - q) * exp(a+b+r)/((q-1)*(exp(a+b) + exp(a+b+r) - q*exp(a) - q*exp(b) + q))**2]
+                    ])
+        # print("inside hess!")
+        return m 
+
+    def con(t):
+        print(t, "in constraint")
+        return t
+    cons = [{'type': 'ineq', 'fun': con}]
+
     def __sets__(seq_a, seq_b):
         # get the msa
         k = len(seq_a)
@@ -33,7 +50,8 @@ def ML_pairwise_estimate(a,b,initials=20):
 
     def l(x): # negative log-likelihood
         d_a, d_b, d_r = x
-        
+        print(d_a, d_b, d_r)
+        print("p1:", log(1 - exp(-d_a)))
         p1 = -(s_1b_len + s_0_len) * d_a + (s_1a_len + s_3_len) * log(1 - exp(-d_a))
         p2 = -(s_1a_len + s_0_len) * d_b + (s_1b_len + s_3_len) * log(1 - exp(-d_b)) - (k - s_2_len) * d_r
         p3 = 0.0
@@ -47,6 +65,8 @@ def ML_pairwise_estimate(a,b,initials=20):
     
     x_star = []
     s_0, s_1a, s_1b, s_2, s_3, k = __sets__(a, b)
+    s_4 = s_1a
+    s_5 = s_1b
     s_0_len,s_1a_len,s_1b_len,s_2_len,s_3_len = len(s_0), len(s_1a), len(s_1b), len(s_2), len(s_3)
     dmax = -log(1/k)*2
     dmin = -log(1-1/k)/2
@@ -55,7 +75,11 @@ def ML_pairwise_estimate(a,b,initials=20):
     f_star = float("inf")
     for i in range(initials):
         x0 = (random()*5,random()*5,random()*5)
-        out = optimize.minimize(l, x0, method="SLSQP", options={'disp': False,'maxiter':1000}, bounds=[bound,bound,bound])
+        if use_hess:
+            # print("calling w/ hess!")
+            out = optimize.minimize(l, x0, method="trust-constr", hess=fun_hess, options={'disp': False,'maxiter':1000}, bounds=[bound,bound,bound], constraints=cons)
+        else:
+            out = optimize.minimize(l, x0, method="SLSQP", options={'disp': False,'maxiter':1000}, bounds=[bound,bound,bound])
         if out.success and out.fun < f_star:
             x_star = out.x
             f_star = out.fun 

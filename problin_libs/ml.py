@@ -36,16 +36,15 @@ def prob_change(msa, q_dict, node_likelihood, site, curr_node, child_states, use
                     if node_likelihood[c][site][char] > 0:
                         tp = q_ialpha * (1 - math.exp(-get_branchlen(c)))
                         # print("[prob_change]: tp", tp)
-                        all_child_prob *= tp * node_likelihood[c][site][char]
+                        all_child_prob += tp * node_likelihood[c][site][char] # GC: Edited this
                 else:
                     q_ialpha = q_dict[site][0]
                     if node_likelihood[c][site][0] > 0:
                         tp = math.exp(-get_branchlen(c))
-                        all_child_prob *= tp * node_likelihood[c][site][0]
+                        all_child_prob += tp * node_likelihood[c][site][0] # GC: Edited this
                 # print("[prob_change]:", all_child_prob)
 
     return all_child_prob
-
 
 
 def likelihood_under_n(node_likelihood, n, site, msa, q_dict, is_root, use_log):
@@ -99,21 +98,24 @@ def get_branchlen(child_node):
     return child_node.edge_length
 
 def get_char(msa, leaf_node, site):
-    return msa[int(leaf_node.taxon.__str__().replace("'", ""))-1][site]
+    # print(msa)
+    return msa[leaf_node.taxon.label][site]
 
-def felsenstein(T, Q, msa, use_log=False, root_edge_len=0.0):
-    numsites = len(msa[0])
+def felsenstein(T, Q, msa, use_log=False): #, root_edge_len=0.0):
+    # print("MSA", msa)
+    numsites = len(msa[next(iter(msa.keys()))])
+    # numsites = len(msa.key[0])
 
     alphabet = dict()
     for site in range(numsites):
         alphabet[site] = Q[site].keys()
 
     # print("q_dict", Q)
-    nwkt = dendropy.Tree.get(data=T, schema="newick")
-    print(nwkt)
+    nwkt = dendropy.Tree.get(data=T, schema="newick", rooting="force-rooted")
+    # print(nwkt)
 
-    for n in nwkt.leaf_node_iter():
-        print(n.taxon, ''.join([str(get_char(msa, n, s)) for s in range(numsites)]))
+    # for n in nwkt.leaf_node_iter():
+    #     print(n.taxon, ''.join([str(get_char(msa, n, s)) for s in range(numsites)]))
 
     node_likelihood = dict()
 
@@ -139,16 +141,16 @@ def felsenstein(T, Q, msa, use_log=False, root_edge_len=0.0):
                     node_likelihood[n][site][char] = 0.0
 
                 node_likelihood = likelihood_under_n(node_likelihood, n, site, msa, Q, nwkt.seed_node is n, use_log)
-            # print(node_likelihood)
+    # print(node_likelihood)
     if use_log:
-        print("Using log.")
+        # print("Using log.")
         tree_likelihood = 0.0
     else:
-        print("NOT using log.")
+        # print("NOT using log.")
         tree_likelihood = 1.0
 
     if nwkt.is_rooted:
-        print("Tree provided was rooted.")
+        # print("Tree provided was rooted.")
         # print("Tree is rooted, here is likelihood at root.", node_likelihood[n])
         for site in range(numsites):
             if use_log:
@@ -157,7 +159,7 @@ def felsenstein(T, Q, msa, use_log=False, root_edge_len=0.0):
                 tree_likelihood *= node_likelihood[n][site][0]
         
     elif not nwkt.is_rooted:
-        print("Tree provided was NOT rooted.")
+        # print("Tree provided was NOT rooted.")
         for site in range(numsites):
             for rootchar in node_likelihood[n][site].keys():
                 prob_rootchar = node_likelihood[n][site][rootchar]
@@ -175,35 +177,38 @@ def felsenstein(T, Q, msa, use_log=False, root_edge_len=0.0):
                             tree_likelihood += np.log((1 - math.exp(-root_edge_len))) + np.log(q_ialpha) + np.log(prob_rootchar)
                         else:
                             tree_likelihood *= ((1 - math.exp(-root_edge_len)) * q_ialpha * prob_rootchar)
-        
+    
     return tree_likelihood
 
 
-def wrapper_felsenstein(T, Q, msa, k, root_edge_len=0.2, use_log=False, initials=20):
-    numsites = len(msa[0])
-
+def wrapper_felsenstein(T, Q, msa, use_log=True, initials=20, optimize_branchlengths=False):
+    numsites = len(msa[next(iter(msa.keys()))])
     alphabet = dict()
     for site in range(numsites):
         alphabet[site] = Q[site].keys()
 
-    print("q_dict", Q)
-    nwkt = dendropy.Tree.get(data=T, schema="newick")
+    nwkt = dendropy.Tree.get(data=T, schema="newick", rooting="force-rooted")
     num_edges = len(list(nwkt.postorder_edge_iter()))
-    print(nwkt)
+    
+    # check what the root edge length is. if none, set to 0.0
+    # print("branch length of seed node", get_branchlen(nwkt.seed_node))
+    root_edge_len = get_branchlen(nwkt.seed_node)
+    if root_edge_len == None:
+        root_edge_len = 0.0
 
-    for n in nwkt.leaf_node_iter():
-        print(n.taxon, ''.join([str(get_char(msa, n, s)) for s in range(numsites)]))
+    def felsenstein(x): 
 
-    def felsenstein(x):
-        # x is a vector containing all branch lengths
-        # map branch lengths to tree edges
         for i, e in enumerate(nwkt.postorder_edge_iter()):
             e.length = x[i]
+
+        alphabet = dict()
+        for site in range(numsites):
+            alphabet[site] = Q[site].keys()
 
         node_likelihood = dict()
 
         for n in nwkt.postorder_node_iter():
-            if n.taxon is not None: # must be a leaf node, set up 
+            if n.is_leaf(): 
                 node_likelihood[n] = dict()
                 for site in range(numsites):
                     node_likelihood[n][site] = dict()
@@ -212,100 +217,81 @@ def wrapper_felsenstein(T, Q, msa, k, root_edge_len=0.2, use_log=False, initials
                     char_state = get_char(msa, n, site)
                     node_likelihood[n][site][char_state] = 1.0
                 
-            elif n.taxon is None: # must be an internal node
+            elif n.is_internal(): 
                 for site in range(numsites):
-                    if n not in node_likelihood:
+                    if n not in node_likelihood.keys():
                         node_likelihood[n] = dict()
                     node_likelihood[n][site] = dict()
                     for char in alphabet[site]:
                         node_likelihood[n][site][char] = 0.0
-                    
-                    node_likelihood = likelihood_under_n(node_likelihood, n, site, msa, Q, use_log)
 
-        tree_likelihood = 1.0
+                    node_likelihood = likelihood_under_n(node_likelihood, n, site, msa, Q, nwkt.seed_node is n, use_log)
+            
+            # print(node_likelihood.keys())
+        if use_log:
+            tree_likelihood = 0.0
+        else:
+            tree_likelihood = 1.0
+
+        # if nwkt.is_rooted:
+        #     print("tree is rooted.", nwkt)
+        #     for site in range(numsites):
+        #         if use_log:
+        #             tree_likelihood += np.log(node_likelihood[n][site][0])
+        #         else:
+        #             tree_likelihood *= node_likelihood[n][site][0]
+            
+        # elif not nwkt.is_rooted:
+            # print("tree is not rooted.", nwkt)
+
+        # assuming that n is the seed_node (forced or otherwise)
         for site in range(numsites):
             for rootchar in node_likelihood[n][site].keys():
                 prob_rootchar = node_likelihood[n][site][rootchar]
-                # print(rootchar, prob_rootchar)
                 if prob_rootchar > 0.0: 
                     q_ialpha = Q[site][rootchar]
                     if rootchar == 0:
-                        if use_log:
-                            tree_likelihood += (-root_edge_len) + np.log(prob_rootchar) # + np.log(q_ialpha) 
+                        if use_log:  # standard log is base e
+                            tree_likelihood += np.log(math.exp(-root_edge_len)) + np.log(prob_rootchar) # + np.log(q_ialpha) 
                         else:
                             tree_likelihood *= (math.exp(-root_edge_len)) * prob_rootchar # * q_ialpha 
-                        
                     else:
                         if use_log:
                             tree_likelihood += np.log((1 - math.exp(-root_edge_len))) + np.log(q_ialpha) + np.log(prob_rootchar)
                         else:
                             tree_likelihood *= ((1 - math.exp(-root_edge_len)) * q_ialpha * prob_rootchar)
-        return tree_likelihood
+        
+        return -tree_likelihood
 
-    x_star = []
-    dmax = -log(1/k)*2
-    dmin = -log(1-1/k)/2
-    bound = (dmin, dmax)
-    x_star = None
-    f_star = float("inf")
+    if optimize_branchlengths: 
+        x_star = []
+        dmax = -log(1/numsites)*2
+        dmin = -log(1-1/numsites)/2
+        bound = (dmin, dmax)
+        # print("bound", bound)
 
-    for i in range(initials):
-        x0 = [random()] * num_edges
-        print(x0)
-        out = optimize.minimize(felsenstein, x0, method="SLSQP", options={'disp':True,'maxiter':1000}, bounds=[bound]*num_edges)
-        if out.success and out.fun < f_star:
-            x_star = out.x
-            f_star = out.fun
+        x_star = None
+        f_star = float("inf")
 
-    return x_star, f_star
+        # x0 = []
+        # for i, e in enumerate(nwkt.postorder_edge_iter()):
+        #     x0.append(e.length)
+        # print("x0", x0)
+        # GC: add this back in later
+        for i in range(initials):
+            x0 = [random() * (dmax - dmin) + dmin] * num_edges
+            out = optimize.minimize(felsenstein, x0, method="SLSQP", options={'disp':False,'maxiter':1000}, bounds=[bound]*num_edges)
+            if out.success and out.fun < f_star:
+                x_star = out.x
+                f_star = out.fun
+            # print(out.fun, out.x)
+        for i, e in enumerate(nwkt.postorder_edge_iter()):
+            e.length = x_star[i]
+        return -f_star, nwkt.as_string("newick"), x_star
 
-import sys
-sys.path.append("/Users/gillianchu/raphael/repos/problin")
-from problin_libs.sequence_lib import read_sequences
-from treeswift import *
-k=30
-m=10
-Q = []
-datadir = "/Users/gillianchu/raphael/repos/problin/MP_inconsistent/"
-
-# for i in range(k):
-#     q = {j+1:1/m for j in range(m)}
-#     q[0] = 0
-#     Q.append(q)
-
-# S = read_sequences(datadir + "seqs_m10_k" + str(k) + ".txt")
-# D = S[1]
-# print(D)
-
-# lb2num = {'a':1,'b':2,'c':3,'d':4}
-# tree = read_tree_newick(datadir + "m10.tre") # tree was not saved rooted.
-# for node in tree.traverse_leaves():
-#     node.label = lb2num[node.label]
-# T = tree.newick()
-
-# T = "[&R] ((1:0.0360971597765934,2:3.339535381892265)e:0.0360971597765934,(3:0.0360971597765934,4:3.339535381892265)f:0.0360971597765934);"
-# msa = []
-# for x in ['a','b','c','d']:
-#     seq = [y for y in D[x]]
-#     msa.append(seq)
-# msa = np.array(msa)
-# print(msa)
-
-# print("likelihood",felsenstein(T, Q, msa, use_log=False, root_edge_len=0.0360971597765934))
-
-# T = "((1:0.0360971597765934,2:3.339535381892265)e:0.0360971597765934,(3:0.0360971597765934,4:3.339535381892265)f:0.0360971597765934);"
-T = "[&R] ((1:0.0360971597765934,2:3.339535381892265):0.0360971597765934,(3:0.0360971597765934,4:3.339535381892265):0.0360971597765934);"
-
-# T = '[&R] (((1:0.96,3:0.96):0.14,2:1.10,4:1.10):0.0360971597765934);' # non-star tree
-msa = np.array([[1,0,2], # species 1
-                [1,0,0], # species 2
-                [0,1,2], # species 3
-                [0,1,0]] # species 4
-            )
-
-# prob of transitioning 0 -> 0, 0 -> 1, 0 -> 2
-Q = [{0: 0, 1:0.3, 2:0.5}, # site 1
-        {0: 0, 1:0.3, 2:0.5}, # site 2
-        {0: 0, 1:0.3, 2:0.5}, # site 3
-    ]
-print("likelihood",felsenstein(T, Q, msa, use_log=False))
+    else:
+        x0 = []
+        # same way that we put it into the tree
+        for i, e in enumerate(nwkt.postorder_edge_iter()):
+            x0.append(e.length)
+        return -felsenstein(x0), nwkt.as_string("newick"), x0
