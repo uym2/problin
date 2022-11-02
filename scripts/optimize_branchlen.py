@@ -73,7 +73,6 @@ def est_d(seq_a, seq_b):
     return d_a, d_b
 
 # Optimize the branch lengths w/ marginal likelihood, using scipy.optimize
-
 def likelihood(x): 
     global k
     global s_0, s_1a, s_1b, s_2, s_3
@@ -95,18 +94,19 @@ def likelihood(x):
 
 
 # def optimize_len(alphabet_size, k, a, b):
-def optimize_len(alphabet_size, a, b, x0):
+def optimize_len(k, a, b, x0):
     x_star = []
     num_iter = 20    
+    dmax = -log(1/k)*2
+    dmin = -log(1-1/k)/2
+    bound = (dmin,dmax)
+
     for i in range(num_iter):
         if i > 0:
-            x0 = np.random.uniform(0, 5.0, 3)
+            x0 = np.random.uniform(dmin, dmax, 3)
         global s_0, s_1a, s_1b, s_2, s_3
         s_0, s_1a, s_1b, s_2, s_3 = sets(a, b)
         # eps = 1e-10
-        dmax = -log(1/k)*2
-        dmin = -log(1-1/k)/2
-        bound = (dmin,dmax)
 
         # out = optimize.minimize(likelihood, x0, method="L-BFGS-B", options={'disp': False}, bounds=[bound, bound, bound])
         out = optimize.minimize(likelihood, x0, method="SLSQP", options={'disp': False}, bounds=[bound, bound, bound])

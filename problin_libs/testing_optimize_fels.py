@@ -1,10 +1,10 @@
 
 ### Testing
-
+import numpy as np
 import sys
 sys.path.append("/Users/gillianchu/raphael/repos/problin")
 from problin_libs.sequence_lib import read_sequences
-from problin_libs.ml import wrapper_felsenstein
+from problin_libs.ml import wrapper_felsenstein, optimize_len
 from treeswift import *
 # k=20
 m=10 # 10
@@ -30,11 +30,25 @@ for k in [5000]:
 
     for idx, D in enumerate(S):
         print("k", k, "rep", idx)
-        true_tree = "((a:0.0360971597765934,b:3.339535381892265)e:0.0360971597765934,(c:0.0360971597765934,d:3.339535381892265)f:0.0360971597765934)r:0.0;"
+        for x in D:
+            print(x, len([y for y in D[x] if D[x][y] == 0] ) )
+        # # true_tree = "((a:0.0360971597765934,b:3.339535381892265)e:0.0360971597765934,(c:0.0360971597765934,d:3.339535381892265)f:0.0360971597765934)r;"
         # true_tree = "(a:0.0360971597765934,b:3.339535381892265)e:0.0360971597765934;"
-        opt_likelihood, opt_tree, opt_branches = wrapper_felsenstein(true_tree, Q, D, use_log=True, optimize_branchlengths=True, initials=5)
-        noopt_likelihood, noopt_tree, noopt_branches = wrapper_felsenstein(true_tree, Q, D, use_log=True, optimize_branchlengths=False)
+        # opt_likelihood, opt_tree, opt_branches = wrapper_felsenstein(true_tree, Q, D, use_log=True, optimize_branchlengths=True, initials=5)
+        # print(opt_likelihood, opt_tree, opt_branches)
+        # est_tree = "((a:0.00045143472400357813,b:7.683405830494674)e:0.00010001000133352235,(c:0.00010001000133352235,d:7.1648549920570614)f:0.00010001000133352235)r:1.132411178316622;"
+        
+        true_tree = "((a:0.0360971597765934,b:3.339535381892265)e:0.0360971597765934,(c:0.0360971597765934,d:3.339535381892265)f:0.0360971597765934)r:0.0;"
+        # noopt_likelihood, noopt_tree, noopt_branches = wrapper_felsenstein(true_tree, Q, D, use_log=True, optimize_branchlengths=True, init_tree=true_tree)
+        # print(noopt_likelihood, noopt_tree, noopt_branches)
+        
+        # noopt_likelihood, noopt_tree, noopt_branches = wrapper_felsenstein(true_tree, Q, D, use_log=True, optimize_branchlengths=False)
+        # print(noopt_likelihood, noopt_tree, noopt_branches)
 
+        # x0 = (0.0360971597765934, 3.339535381892265, 0.0360971597765934)
+        # fout = optimize_len(k, D['a'], D['b'], x0)
+        # print(sorted(fout, key=lambda x: x[0])[-1])
+        # break
         # noopt_likelihood_1, noopt_tree_1, noopt_branches_1 = wrapper_felsenstein(true_tree, Q, D, use_log=True, optimize_branchlengths=False)
         # true_tree = "(a:0.0360971597765934,b:3.339535381892265)e:1.0;"
         # noopt_likelihood_2, noopt_tree_2, noopt_branches_2 = wrapper_felsenstein(true_tree, Q, D, use_log=True, optimize_branchlengths=False)
@@ -47,12 +61,12 @@ for k in [5000]:
         # false_tree = "((a:0.0360971597765934,d:3.339535381892265)e:0.0360971597765934,(c:0.0360971597765934,b:3.339535381892265)f:0.0360971597765934)r;"
         # fels_false_likelihood = wrapper_felsenstein(false_tree, Q, D, use_log=True, optimize_branchlengths=False)
         
-        print(opt_likelihood > noopt_likelihood)
-        for x, y in zip(opt_branches, noopt_branches):
-            print(x, y)
+        # print(opt_likelihood > noopt_likelihood)
+        # for x, y in zip(opt_branches, noopt_branches):
+        #     print(x, y)
 
-        if idx > 2:
-            break
+        # if idx > 2:
+        #     break
         # if opt_likelihood > noopt_likelihood:
         #     num_true += 1
         # elif opt_likelihood < noopt_likelihood: 

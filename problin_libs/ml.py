@@ -181,7 +181,7 @@ def felsenstein(T, Q, msa, use_log=False): #, root_edge_len=0.0):
     return tree_likelihood
 
 
-def wrapper_felsenstein(T, Q, msa, use_log=True, initials=20, optimize_branchlengths=False):
+def wrapper_felsenstein(T, Q, msa, use_log=True, initials=20, optimize_branchlengths=False, init_tree=None):
     numsites = len(msa[next(iter(msa.keys()))])
     alphabet = dict()
     for site in range(numsites):
@@ -198,7 +198,7 @@ def wrapper_felsenstein(T, Q, msa, use_log=True, initials=20, optimize_branchlen
 
     def felsenstein(x): 
 
-        for i, e in enumerate(nwkt.postorder_edge_iter()):
+        for i, e in enumerate(nwkt.postorder_edge_iter()): # visit the descendents before visiting edge
             e.length = x[i]
 
         alphabet = dict()
@@ -233,17 +233,6 @@ def wrapper_felsenstein(T, Q, msa, use_log=True, initials=20, optimize_branchlen
         else:
             tree_likelihood = 1.0
 
-        # if nwkt.is_rooted:
-        #     print("tree is rooted.", nwkt)
-        #     for site in range(numsites):
-        #         if use_log:
-        #             tree_likelihood += np.log(node_likelihood[n][site][0])
-        #         else:
-        #             tree_likelihood *= node_likelihood[n][site][0]
-            
-        # elif not nwkt.is_rooted:
-            # print("tree is not rooted.", nwkt)
-
         # assuming that n is the seed_node (forced or otherwise)
         for site in range(numsites):
             for rootchar in node_likelihood[n][site].keys():
@@ -252,7 +241,7 @@ def wrapper_felsenstein(T, Q, msa, use_log=True, initials=20, optimize_branchlen
                     q_ialpha = Q[site][rootchar]
                     if rootchar == 0:
                         if use_log:  # standard log is base e
-                            tree_likelihood += np.log(math.exp(-root_edge_len)) + np.log(prob_rootchar) # + np.log(q_ialpha) 
+                            tree_likelihood += (-root_edge_len) + np.log(prob_rootchar) # + np.log(q_ialpha) 
                         else:
                             tree_likelihood *= (math.exp(-root_edge_len)) * prob_rootchar # * q_ialpha 
                     else:
@@ -260,7 +249,6 @@ def wrapper_felsenstein(T, Q, msa, use_log=True, initials=20, optimize_branchlen
                             tree_likelihood += np.log((1 - math.exp(-root_edge_len))) + np.log(q_ialpha) + np.log(prob_rootchar)
                         else:
                             tree_likelihood *= ((1 - math.exp(-root_edge_len)) * q_ialpha * prob_rootchar)
-        
         return -tree_likelihood
 
     if optimize_branchlengths: 
@@ -268,23 +256,30 @@ def wrapper_felsenstein(T, Q, msa, use_log=True, initials=20, optimize_branchlen
         dmax = -log(1/numsites)*2
         dmin = -log(1-1/numsites)/2
         bound = (dmin, dmax)
-        # print("bound", bound)
+        print("bound", bound)
 
         x_star = None
         f_star = float("inf")
 
-        # x0 = []
-        # for i, e in enumerate(nwkt.postorder_edge_iter()):
-        #     x0.append(e.length)
-        # print("x0", x0)
-        # GC: add this back in later
-        for i in range(initials):
-            x0 = [random() * (dmax - dmin) + dmin] * num_edges
+        x0 = []
+        if init_tree: 
+            init_tree = dendropy.Tree.get(data=init_tree, schema="newick", rooting="force-rooted")
+            for i, e in enumerate(init_tree.postorder_edge_iter()): # visit the descendents before visiting edge
+                x0.append(e.length)
+            print("initial likelihood", -felsenstein(x0))
             out = optimize.minimize(felsenstein, x0, method="SLSQP", options={'disp':False,'maxiter':1000}, bounds=[bound]*num_edges)
-            if out.success and out.fun < f_star:
-                x_star = out.x
-                f_star = out.fun
-            # print(out.fun, out.x)
+            x_star = out.x
+            f_star = out.fun
+        else: 
+
+            for i in range(initials):
+                x0 = [random() * (dmax - dmin) + dmin] * num_edges
+                out = optimize.minimize(felsenstein, x0, method="SLSQP", options={'disp':False,'maxiter':1000}, bounds=[bound]*num_edges)
+                if out.success and out.fun < f_star:
+                    x_star = out.x
+                    f_star = out.fun
+                print(i, [out.fun, out.x], end='')
+
         for i, e in enumerate(nwkt.postorder_edge_iter()):
             e.length = x_star[i]
         return -f_star, nwkt.as_string("newick"), x_star
@@ -295,3 +290,234 @@ def wrapper_felsenstein(T, Q, msa, use_log=True, initials=20, optimize_branchlen
         for i, e in enumerate(nwkt.postorder_edge_iter()):
             x0.append(e.length)
         return -felsenstein(x0), nwkt.as_string("newick"), x0
+
+def sets(seq_a, seq_b):
+    # get the msa
+    k = len(seq_a)
+    
+    ## calculate the sets  
+    s_0, s_1a, s_1b, s_2, s_3 = set(), set(), set(), set(), set()
+    for idx in range(len(seq_a)):
+        c_a, c_b = seq_a[idx], seq_b[idx]
+        if c_a == c_b:
+            if c_a == 0:
+                s_0.add(idx)
+            else:
+                s_2.add(idx)
+        elif c_a == 0: # then c_b != 0
+            s_1b.add(idx)
+        elif c_b == 0: # then c_a != 0
+            s_1a.add(idx)
+        else:
+            s_3.add(idx)
+    
+    assert len(s_0) + len(s_1a) + len(s_1b) + len(s_2) + len(s_3) == k
+    return [s_0, s_1a, s_1b, s_2, s_3]
+
+def get_taxon_name(node):
+    return int(node.taxon.__str__().replace("'", ""))
+
+def est_d(seq_a, seq_b):
+    # print("est_d")
+    # print(seq_a, seq_b)
+    
+    # leaf nodes a and b
+    Z_a = seq_a.count(0)
+    Z_b = seq_b.count(0)
+    Z_ab = set()
+    
+    for i in range(len(seq_a)):
+        a_i, b_i = seq_a[i], seq_b[i]
+        if a_i == 0:
+            Z_ab.add(i)
+        if b_i == 0:
+            Z_ab.add(i)
+        if a_i != b_i and a_i != 0 and b_i != 0:
+            Z_ab.add(i)
+    Z_ab = len(Z_ab)
+    
+    # print("Z_a, Z_b, Z_ab", Z_a, Z_b, Z_ab)
+    
+    d_a = - np.log(Z_a/Z_ab)
+    d_b = - np.log(Z_b/Z_ab)
+    
+    
+    if d_a == -0.0:
+        d_a = 0.0
+    if d_b == -0.0:
+        d_b = 0.0
+    
+    # print("d_a, d_b", d_a, d_b)
+    return d_a, d_b
+
+
+# def optimize_len(alphabet_size, k, a, b):
+def optimize_len(k, a, b, x0):
+    x_star = []
+    num_iter = 20    
+    dmax = -log(1/k)*2
+    dmin = -log(1-1/k)/2
+    bound = (dmin,dmax)
+
+    def branch_likelihood(x): 
+        s_0_len, s_1a_len, s_1b_len, s_2_len, s_3_len = len(s_0), len(s_1a), len(s_1b), len(s_2), len(s_3)
+        
+        d_a, d_b, d_r = x
+        q = 0.2
+        
+        p1 = -(s_1b_len + s_0_len) * d_a + (s_1a_len + s_3_len) * np.log(1 - math.exp(-d_a))
+        p2 = -(s_1a_len + s_0_len) * d_b + (s_1b_len + s_3_len) * np.log(1 - math.exp(-d_b)) - (k - s_2_len) * d_r
+        p3 = 0.0
+        
+        for i in range(s_2_len): # assuming that prob to any alpha is the same
+            # q_ialpha is the transition rate at site i from 0 -> character at node a at site i
+            # iterate over sites in s_2, get q for each alpha
+            p3 += np.log(q**2 * (1 - math.exp(-d_a)) * (1 - math.exp(-d_b)) * math.exp(-d_r) + q*(1 - math.exp(-d_r)))
+        
+        return -(p1 + p2 + p3)
+
+    for i in range(num_iter):
+        if i > 0:
+            x0 = np.random.uniform(dmin, dmax, 3)
+        s_0, s_1a, s_1b, s_2, s_3 = sets(a, b)
+        # eps = 1e-10
+
+
+        # out = optimize.minimize(likelihood, x0, method="L-BFGS-B", options={'disp': False}, bounds=[bound, bound, bound])
+        out = optimize.minimize(branch_likelihood, x0, method="SLSQP", options={'disp': False}, bounds=[bound, bound, bound])
+
+        x_star.append((out['fun'], out['x']))
+        # w, v = LA.eig(out.hess_inv.todense())
+        # print(w > 0.0)
+        
+    return x_star
+
+
+def get_seq(seq_dict, leaf_node):
+    return seq_dict[int(leaf_node.taxon.__str__().replace("'", ""))]
+               
+def get_idx(leaf_node):
+    # print(leaf_node)
+    return int(leaf_node.taxon.__str__().replace("'", ""))
+
+def my_print_tree(t):
+    for n in t.postorder_node_iter():
+        n.label = ''
+    print(t)
+
+def run_trees(fname, topo, m, num_to_run=2):
+    trees = []
+    sets_of_four = []
+    with open(fname) as r:
+        four_leaves = []
+        for record in SeqIO.parse(r, "fasta"):
+            s = str(record.seq)
+            if '_________' in record.seq:
+                s = s.replace('_________', '')
+                four_leaves.append([int(x) for x in s.split('|')])
+                sets_of_four.append(four_leaves)
+                four_leaves = []
+            else:
+                four_leaves.append([int(x) for x in s.split('|')])
+    print(len(sets_of_four), "trees read.")
+
+    all_dists = dict()
+    all_seqs = dict()
+    
+    for idx, seqs in enumerate(sets_of_four):
+        dists = dict()
+        seq_dict = dict()
+        num_seqs = len(seqs)
+
+        if idx == num_to_run:
+                break
+
+        for i in range(num_seqs):
+            seq_dict[i] = seqs[i]
+            
+        for pair in itertools.combinations(list(range(num_seqs)), 2):
+            # if idx % 5 == 0:
+                # print(idx)
+
+            a, b = pair
+            x0 = np.random.uniform(0, 5.0, 3)
+            x_star = optimize_len(m, seqs[a], seqs[b], x0) 
+            # print the stddev of x_star
+            d_ab = sorted(x_star, key=lambda x: x[0], reverse=True)[0][1]
+            d_a, d_b, d_r = d_ab
+            dists[(a, b)] = [d_a, d_b, d_r]
+
+        all_dists[idx] = dists
+        all_seqs[idx] = seq_dict
+
+        # estimate branch length for every pair of leaves
+        for n in topo.postorder_node_iter():
+            if n.is_internal(): # must be an internal node
+                node_a, node_b = n.child_nodes()
+                if node_a.is_leaf(): 
+                    idx_a = get_idx(node_a)
+                    seq_a = get_seq(seq_dict, node_a)
+                if node_b.is_leaf():
+                    idx_b = get_idx(node_b)
+                    seq_b = get_seq(seq_dict, node_b)
+                if node_a.is_leaf() and node_b.is_leaf():
+                    if (idx_a, idx_b) in dists:
+                        d_a, d_b, d_r = dists[(idx_a, idx_b)]
+                        node_a.edge.length = d_a
+                        node_b.edge.length = d_b
+                        n.edge.length = d_r
+                    elif (idx_b, idx_a) in dists:
+                        d_b, d_a, d_r = dists[(idx_b, idx_a)]
+                        node_a.edge.length = d_a
+                        node_b.edge.length = d_b
+                        n.edge.length = d_r
+                    else:
+                        print("dists", dists)
+        trees.append(topo)
+    return trees
+
+
+def run_mats(fname, topo, m, num_to_run=2):
+    trees = []
+    sets_of_four = []
+    with open(fname) as r:
+        four_leaves = []
+        for record in SeqIO.parse(r, "fasta"):
+            s = str(record.seq)
+            if '_________' in record.seq:
+                s = s.replace('_________', '')
+                four_leaves.append([int(x) for x in s.split('|')])
+                sets_of_four.append(four_leaves)
+                four_leaves = []
+            else:
+                four_leaves.append([int(x) for x in s.split('|')])
+    print(len(sets_of_four), "trees read.")
+
+    all_dists = dict()
+    all_seqs = dict()
+    
+    for idx, seqs in enumerate(sets_of_four):
+        dists = dict()
+        seq_dict = dict()
+        num_seqs = len(seqs)
+
+        if idx == num_to_run:
+                break
+
+        for i in range(num_seqs):
+            seq_dict[i] = seqs[i]
+            
+        for pair in itertools.combinations(list(range(num_seqs)), 2):
+
+            a, b = pair
+            x0 = np.random.uniform(0, 5.0, 3)
+            x_star = optimize_len(m, seqs[a], seqs[b], x0) 
+            # print the stddev of x_star
+            d_ab = sorted(x_star, key=lambda x: x[0], reverse=True)[0][1]
+            d_a, d_b, d_r = d_ab
+            dists[(a, b)] = [d_a, d_b, d_r]
+
+        all_dists[idx] = dists
+        all_seqs[idx] = seq_dict
+
+    return all_dists

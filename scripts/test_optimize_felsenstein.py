@@ -2,21 +2,21 @@ import numpy as np
 from scipy import optimize
 import math
 from math import log, exp
-
 import sys
-sys.path.append("/Users/gillianchu/raphael/repos/problin/problin_libs")
+sys.path.append("/Users/gillianchu/raphael/repos/problin")
 # from distance_based_lib import ML_pairwise_estimate
-from ml import wrapper_felsenstein
+from problin_libs.ml import wrapper_felsenstein
+from problin_libs.compare_two_trees import compare_trees
 from sequence_lib import read_sequences
 
 true_tree = ''
 T = '[&R] ((0,1),(2,3));'
 
-msa = np.array([[1,0,2], # species 1
-                [1,0,0], # species 2
-                [0,1,2], # species 3
-                [0,1,0]] # species 4
-            )
+# msa = np.array([[1,0,2], # species 1
+#                 [1,0,0], # species 2
+#                 [0,1,2], # species 3
+#                 [0,1,0]] # species 4
+#             )
 
 # prob of transitioning 0 -> 0, 0 -> 1, 0 -> 2
 # Q = [{0: 0.2, 1:0.3, 2:0.5}, # site 1
@@ -36,24 +36,26 @@ msa = np.array([[1,0,2], # species 1
 # print(x_star, f_star)
 
 # enumerate all fifteen topologies for 4 leaves
-topologies = ["((a,b),(c,d));","((a,c),(b,d));","((a,d),(b,c));",
-            "(a,(b,(c,d)));","(a,(c,(b,d)));","(a,(d,(b,c)));",
-            "(b,(a,(c,d)));","(b,(c,(a,d)));","(b,(d,(a,c)));",
-            "(c,(a,(b,d)));","(c,(b,(a,d)));","(c,(d,(a,b)));",
-            "(d,(a,(b,c)));","(d,(b,(a,c)));","(d,(c,(a,b)));"]
+# topologies = ["((a,b),(c,d));","((a,c),(b,d));","((a,d),(b,c));",
+#             "(a,(b,(c,d)));","(a,(c,(b,d)));","(a,(d,(b,c)));",
+#             "(b,(a,(c,d)));","(b,(c,(a,d)));","(b,(d,(a,c)));",
+#             "(c,(a,(b,d)));","(c,(b,(a,d)));","(c,(d,(a,b)));",
+#             "(d,(a,(b,c)));","(d,(b,(a,c)));","(d,(c,(a,b)));"]
+topologies = ["((a,b),(c,d));","(c,(b,(a,d)));"]
 
 true_topology = '((a,b),(c,d));',
 
 m = 10
-with open("ML_felsenstein_results.txt",'w') as fout:
-    for k in [5000]: #,30,40,50,100,200,300,400,500,1000,5000]:
+for k in [5000]: #,30,40,50,100,200,300,400,500,1000,5000]:
+    with open("ML_felsenstein_results_k" + str(k) + ".txt",'w') as fout:
+
         correct = 0
         total = 0
 
         S = read_sequences("/Users/gillianchu/raphael/repos/problin/MP_inconsistent/seqs_m10_k" + str(k) + ".txt")
         n_total = 0
         n_correct = 0
-        for D in S[:20]:
+        for D in S[:15]:
 
             Q = []
             for i in range(k):
@@ -64,9 +66,10 @@ with open("ML_felsenstein_results.txt",'w') as fout:
             top_x_star =  -float("inf")
             top_f_star =  -float("inf")
             top_topology = None
-            for topology in topologies: 
-                x_star, f_star = wrapper_felsenstein(topology, Q, D, use_log=True)
-                # print(topology, f_star)
+            for t, topology in enumerate(topologies): 
+                f_star, est_tree, x_star = wrapper_felsenstein(topology, Q, D, use_log=True, optimize_branchlengths=True) #, init_tree=true_tree)
+                print(t, f_star, est_tree, x_star)
+                print("EST_TREE", est_tree)
                 if f_star > top_f_star:
                     top_f_star = f_star
                     top_x_star = x_star
@@ -74,6 +77,13 @@ with open("ML_felsenstein_results.txt",'w') as fout:
             if top_topology == true_topology:
                 correct += 1
             total += 1
+            fout.write(top_topology + "\t" + str(top_f_star) + "\n", flush=True)
             print(k, "characters", correct, total, top_topology)
         print(k, "characters", correct/total, "true topologies selected.")
         # fout.write(str(k) + " " + str(n_correct/n_total) + "\n")
+
+    with open("ML_felsenstein_results_k" + str(k) + ".txt", "r") as r:
+        lines = r.readlines()
+        for line in lines:
+            topology, likelihood = line.split("\t")
+            print(compare_trees(true_topology, topology))
